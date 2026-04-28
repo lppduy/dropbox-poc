@@ -6,7 +6,7 @@ import (
 	"log"
 
 	"github.com/gin-gonic/gin"
-	"github.com/lppduy/dropbox-poc/services/file-service/internal/api/httpx"
+	"github.com/lppduy/dropbox-poc/services/file-service/internal/api/response"
 	"github.com/lppduy/dropbox-poc/services/file-service/internal/client"
 	"github.com/lppduy/dropbox-poc/services/file-service/internal/domain"
 	"github.com/lppduy/dropbox-poc/services/file-service/internal/service"
@@ -28,7 +28,7 @@ func (c *FileController) InitUpload(ctx *gin.Context) {
 		ChunkHashes []string `json:"chunkHashes"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil || req.OwnerID == "" || req.Filename == "" {
-		httpx.BadRequest(ctx, "ownerId, filename, and chunkHashes are required")
+		response.BadRequest(ctx, "ownerId, filename, and chunkHashes are required")
 		return
 	}
 
@@ -38,11 +38,11 @@ func (c *FileController) InitUpload(ctx *gin.Context) {
 		ChunkHashes: req.ChunkHashes,
 	})
 	if err != nil {
-		httpx.InternalError(ctx, "failed to init upload")
+		response.InternalError(ctx, "failed to init upload")
 		return
 	}
 
-	httpx.Created(ctx, gin.H{
+	response.Created(ctx, gin.H{
 		"fileId":        result.FileID,
 		"missingChunks": result.MissingChunks,
 	})
@@ -51,26 +51,26 @@ func (c *FileController) InitUpload(ctx *gin.Context) {
 func (c *FileController) UploadChunk(ctx *gin.Context) {
 	hash := ctx.Param("hash")
 	if hash == "" {
-		httpx.BadRequest(ctx, "hash is required")
+		response.BadRequest(ctx, "hash is required")
 		return
 	}
 
 	data, err := io.ReadAll(ctx.Request.Body)
 	if err != nil || len(data) == 0 {
-		httpx.BadRequest(ctx, "empty chunk data")
+		response.BadRequest(ctx, "empty chunk data")
 		return
 	}
 
 	if err := c.svc.StoreChunk(ctx.Request.Context(), hash, data); err != nil {
 		if errors.Is(err, domain.ErrHashMismatch) {
-			httpx.BadRequest(ctx, "chunk hash mismatch")
+			response.BadRequest(ctx, "chunk hash mismatch")
 			return
 		}
-		httpx.InternalError(ctx, "failed to store chunk")
+		response.InternalError(ctx, "failed to store chunk")
 		return
 	}
 
-	httpx.OK(ctx, gin.H{"stored": hash})
+	response.OK(ctx, gin.H{"stored": hash})
 }
 
 func (c *FileController) CompleteUpload(ctx *gin.Context) {
@@ -81,13 +81,13 @@ func (c *FileController) CompleteUpload(ctx *gin.Context) {
 		BaseVersion   int      `json:"baseVersion"` // 0 means first upload (no conflict detection)
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil || req.OwnerID == "" || len(req.OrderedHashes) == 0 {
-		httpx.BadRequest(ctx, "ownerId and orderedHashes are required")
+		response.BadRequest(ctx, "ownerId and orderedHashes are required")
 		return
 	}
 
 	result, err := c.svc.CompleteUpload(ctx.Request.Context(), fileID, req.OrderedHashes, req.OwnerID, req.BaseVersion)
 	if err != nil {
-		httpx.InternalError(ctx, "failed to complete upload")
+		response.InternalError(ctx, "failed to complete upload")
 		return
 	}
 
@@ -103,7 +103,7 @@ func (c *FileController) CompleteUpload(ctx *gin.Context) {
 		}
 	}()
 
-	httpx.OK(ctx, gin.H{
+	response.OK(ctx, gin.H{
 		"fileId":   fileID,
 		"version":  result.Version,
 		"conflict": result.Conflict,
@@ -114,11 +114,11 @@ func (c *FileController) GetManifest(ctx *gin.Context) {
 	fileID := ctx.Param("id")
 	chunks, err := c.svc.GetManifest(ctx.Request.Context(), fileID)
 	if err != nil {
-		httpx.InternalError(ctx, "failed to get manifest")
+		response.InternalError(ctx, "failed to get manifest")
 		return
 	}
 
-	httpx.OK(ctx, gin.H{"fileId": fileID, "chunks": chunks})
+	response.OK(ctx, gin.H{"fileId": fileID, "chunks": chunks})
 }
 
 func (c *FileController) DownloadChunk(ctx *gin.Context) {
@@ -126,10 +126,10 @@ func (c *FileController) DownloadChunk(ctx *gin.Context) {
 	data, err := c.svc.GetChunk(ctx.Request.Context(), hash)
 	if err != nil {
 		if errors.Is(err, domain.ErrChunkNotFound) {
-			httpx.NotFound(ctx, "chunk not found")
+			response.NotFound(ctx, "chunk not found")
 			return
 		}
-		httpx.InternalError(ctx, "failed to get chunk")
+		response.InternalError(ctx, "failed to get chunk")
 		return
 	}
 
@@ -142,17 +142,17 @@ func (c *FileController) SyncDiff(ctx *gin.Context) {
 		ClientVersion int `json:"clientVersion"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		httpx.BadRequest(ctx, "clientVersion is required")
+		response.BadRequest(ctx, "clientVersion is required")
 		return
 	}
 
 	added, removed, current, err := c.svc.GetSyncDiff(ctx.Request.Context(), fileID, req.ClientVersion)
 	if err != nil {
-		httpx.InternalError(ctx, "sync diff failed")
+		response.InternalError(ctx, "sync diff failed")
 		return
 	}
 
-	httpx.OK(ctx, gin.H{
+	response.OK(ctx, gin.H{
 		"currentVersion": current,
 		"needDownload":   added,
 		"needDelete":     removed,
