@@ -1,0 +1,69 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: dropbox-postgres
+    environment:
+      POSTGRES_DB: dropbox_poc
+      POSTGRES_USER: dev
+      POSTGRES_PASSWORD: dev
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dev -d dropbox_poc"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: dropbox-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  file-service:
+    build:
+      context: ..
+      dockerfile: services/file-service/Dockerfile
+    container_name: dropbox-file-service
+    ports:
+      - "8081:8081"
+    environment:
+      PORT: "8081"
+      DATABASE_URL: postgres://dev:dev@postgres:5432/dropbox_poc?sslmode=disable
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      SYNC_SERVICE_URL: http://sync-service:8082
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+
+  sync-service:
+    build:
+      context: ..
+      dockerfile: services/sync-service/Dockerfile
+    container_name: dropbox-sync-service
+    ports:
+      - "8082:8082"
+    environment:
+      PORT: "8082"
+
+volumes:
+  postgres_data:
+  minio_data:

@@ -1,0 +1,19 @@
+# Binaries
+bin/
+*.exe
+
+# Go build cache
+/tmp/
+
+# Environment
+.env
+*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
