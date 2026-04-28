@@ -77,57 +77,57 @@ cd infra && docker compose up -d
 
 ### Flow 1 — Upload
 
-> Client muốn lưu file lên server
+> Client wants to save a file to the server
 
 ```
 Client                          file-service
   │                                  │
-  │── POST /upload/init ────────────>│  gửi tất cả chunk hashes
-  │<── { missingChunks: [...] } ─────│  server chỉ trả về hash nào chưa có
+  │── POST /upload/init ────────────>│  send all chunk hashes
+  │<── { missingChunks: [...] } ─────│  server returns only hashes it doesn't have
   │                                  │
-  │── PUT /upload/chunk/:hash ──────>│  upload từng chunk còn thiếu
-  │   (bỏ qua chunk đã tồn tại)      │  server verify SHA-256
+  │── PUT /upload/chunk/:hash ──────>│  upload each missing chunk
+  │   (skip chunks already stored)   │  server verifies SHA-256
   │                                  │
-  │── POST /files/:id/complete ─────>│  gửi orderedHashes + baseVersion
-  │<── { version: 2 } ──────────────│  tạo version mới, notify sync-service
+  │── POST /files/:id/complete ─────>│  send orderedHashes + baseVersion
+  │<── { version: 2 } ──────────────│  create new version, notify sync-service
 ```
 
-**Dedup:** nếu file khác đã upload chunk giống nhau → skip, không upload lại.
+**Dedup:** if another file already uploaded the same chunk → skip, no re-upload.
 
 ---
 
 ### Flow 2 — Download
 
-> Client muốn tải file về
+> Client wants to download a file
 
 ```
 Client                          file-service          MinIO
   │                                  │                  │
   │── GET /files/:id/manifest ──────>│                  │
-  │<── { chunks: [h0,h1,h2] } ──────│  danh sách hash theo thứ tự
+  │<── { chunks: [h0,h1,h2] } ──────│  ordered list of chunk hashes
   │                                  │                  │
   │── GET /chunks/h0 ───────────────>│── get object ───>│
   │<── binary data ─────────────────│<─────────────────│
-  │   (lặp lại cho h1, h2)          │                  │
+  │   (repeat for h1, h2)           │                  │
   │                                  │                  │
-  │ ghép h0+h1+h2 thành file gốc    │                  │
+  │ reassemble h0+h1+h2 → original file                 │
 ```
 
 ---
 
 ### Flow 3 — Real-time Sync (WebSocket)
 
-> Bob muốn biết ngay khi Alice sửa file
+> Bob wants to be notified immediately when Alice edits a file
 
 ```
 Bob                     sync-service            Alice → file-service
   │                          │                         │
   │── WS connect ───────────>│                         │
-  │── watch { fileId } ─────>│  đăng ký theo dõi       │
+  │── watch { fileId } ─────>│  register as watcher    │
   │                          │                         │
-  │                          │<── /internal/notify ────│  Alice upload xong
+  │                          │<── /internal/notify ────│  Alice finishes upload
   │                          │                         │
-  │<── file_changed ─────────│  push qua WebSocket     │
+  │<── file_changed ─────────│  push via WebSocket     │
   │   { version: 3 }         │                         │
 ```
 
@@ -135,43 +135,43 @@ Bob                     sync-service            Alice → file-service
 
 ### Flow 4 — Delta Sync
 
-> Client offline một thời gian, muốn sync lại mà không tải toàn bộ file
+> Client was offline, wants to sync without re-downloading the entire file
 
 ```
 Client                          file-service
   │                                  │
-  │── POST /files/:id/sync ─────────>│  gửi clientVersion: 2
+  │── POST /files/:id/sync ─────────>│  send clientVersion: 2
   │<── {                             │
-  │     currentVersion: 5,           │  so sánh chunk của v2 vs v5
-  │     needDownload: [hashX,hashY], │  chunk mới → tải về
-  │     needDelete:   [hashB]        │  chunk bị xóa → xóa local
+  │     currentVersion: 5,           │  diff chunks of v2 vs v5
+  │     needDownload: [hashX,hashY], │  new chunks → download
+  │     needDelete:   [hashB]        │  removed chunks → delete locally
   │   }                              │
   │                                  │
-  │── tải hashX, hashY               │  chỉ tải phần thay đổi
+  │── download hashX, hashY          │  only transfer what changed
 ```
 
 ---
 
 ### Flow 5 — Conflict (Last-Write-Wins)
 
-> Alice và Bob cùng sửa file từ version 1, Bob upload trước
+> Alice and Bob both edit the file from version 1, Bob uploads first
 
 ```
 Bob                       file-service              Alice
   │                            │                      │
   │── complete (base=1) ──────>│                      │
-  │<── { version: 2 } ─────────│  Bob lưu v2          │
+  │<── { version: 2 } ─────────│  Bob saves v2        │
   │                            │                      │
-  │                            │       Alice cũng upload (base=1)
+  │                            │       Alice also uploads (base=1)
   │                            │<── complete (base=1) ─│
   │                            │  base(1) < current(2) → CONFLICT
-  │                            │  lưu v3, loser = Bob  │
+  │                            │  save v3, loser = Bob │
   │                            │                      │
-  │<── upload_conflict ────────│─────────────────────>│  Alice thắng (v3)
-  │   "your v2 was overwritten"│                      │  Bob nhận conflict
+  │<── upload_conflict ────────│─────────────────────>│  Alice wins (v3)
+  │   "your v2 was overwritten"│                      │  Bob gets conflict event
 ```
 
-**Quy tắc:** version nào upload sau thắng. Người thua nhận `upload_conflict` qua WebSocket. Mọi version đều được giữ lại trong DB.
+**Rule:** last upload wins. The losing client receives `upload_conflict` via WebSocket. All versions are preserved in the DB.
 
 ---
 
@@ -179,19 +179,19 @@ Bob                       file-service              Alice
 
 ```bash
 # Upload
-POST /upload/init          # bắt đầu, nhận missingChunks
-PUT  /upload/chunk/:hash   # upload từng chunk
-POST /files/:id/complete   # hoàn tất, tạo version mới
+POST /upload/init          # start upload, receive missingChunks
+PUT  /upload/chunk/:hash   # upload a single chunk
+POST /files/:id/complete   # finalize upload, create new version
 
 # Download
-GET /files/:id/manifest    # lấy danh sách chunk hashes
-GET /chunks/:hash          # tải 1 chunk
+GET /files/:id/manifest    # get ordered chunk hashes
+GET /chunks/:hash          # download a single chunk
 
 # Sync
 POST /files/:id/sync       # diff clientVersion vs current
 
 # WebSocket (sync-service)
-GET  /ws?userId=<id>       # kết nối
+GET  /ws?userId=<id>       # connect
 ```
 
 ## Quick Start
