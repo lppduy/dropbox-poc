@@ -58,21 +58,6 @@ Client
 { "event": "file_changed", "fileId": "...", "version": 3, "changedBy": "user_alice" }
 ```
 
-## Quick Start
-
-```bash
-# Start infrastructure
-cd infra && docker compose up -d
-
-# Wait for services to be healthy, then run smoke test
-./scripts/smoke-test.sh
-
-# Full E2E happy path
-./scripts/e2e-happy-path.sh
-```
-
-**MinIO Web UI:** http://localhost:9001 (minioadmin / minioadmin)
-
 ## Flows
 
 ### Flow 1 — Upload
