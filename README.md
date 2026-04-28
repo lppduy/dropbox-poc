@@ -73,50 +73,133 @@ cd infra && docker compose up -d
 
 **MinIO Web UI:** http://localhost:9001 (minioadmin / minioadmin)
 
-## Upload Flow Example
+## Flows
 
-```bash
-# 1. Split file into chunks (client-side)
-split -b 4m bigfile.pdf chunk_
+### Flow 1 — Upload
 
-# 2. Compute hashes
-sha256sum chunk_* | awk '{print $1}' > hashes.txt
+> Client muốn lưu file lên server
 
-# 3. Init upload
-curl -X POST http://localhost:8081/upload/init \
-  -H "Content-Type: application/json" \
-  -d '{"ownerId":"user1","filename":"bigfile.pdf","chunkHashes":["hash0","hash1","hash2"]}'
-# → {"fileId":"<uuid>","missingChunks":["hash1"]}  ← only upload what's missing
-
-# 4. Upload missing chunks
-curl -X PUT http://localhost:8081/upload/chunk/hash1 \
-  -H "Content-Type: application/octet-stream" \
-  --data-binary @chunk_ab
-
-# 5. Finalize
-curl -X POST http://localhost:8081/files/<uuid>/complete \
-  -H "Content-Type: application/json" \
-  -d '{"ownerId":"user1","orderedHashes":["hash0","hash1","hash2"]}'
+```
+Client                          file-service
+  │                                  │
+  │── POST /upload/init ────────────>│  gửi tất cả chunk hashes
+  │<── { missingChunks: [...] } ─────│  server chỉ trả về hash nào chưa có
+  │                                  │
+  │── PUT /upload/chunk/:hash ──────>│  upload từng chunk còn thiếu
+  │   (bỏ qua chunk đã tồn tại)      │  server verify SHA-256
+  │                                  │
+  │── POST /files/:id/complete ─────>│  gửi orderedHashes + baseVersion
+  │<── { version: 2 } ──────────────│  tạo version mới, notify sync-service
 ```
 
-## Delta Sync Flow Example
+**Dedup:** nếu file khác đã upload chunk giống nhau → skip, không upload lại.
 
-```bash
-# Client reconnects after being offline
-curl -X POST http://localhost:8081/files/<uuid>/sync \
-  -H "Content-Type: application/json" \
-  -d '{"clientVersion":2}'
-# → {"currentVersion":4,"needDownload":["hashX","hashY"],"needDelete":["hashB"]}
-# Client only downloads hashX + hashY
+---
+
+### Flow 2 — Download
+
+> Client muốn tải file về
+
+```
+Client                          file-service          MinIO
+  │                                  │                  │
+  │── GET /files/:id/manifest ──────>│                  │
+  │<── { chunks: [h0,h1,h2] } ──────│  danh sách hash theo thứ tự
+  │                                  │                  │
+  │── GET /chunks/h0 ───────────────>│── get object ───>│
+  │<── binary data ─────────────────│<─────────────────│
+  │   (lặp lại cho h1, h2)          │                  │
+  │                                  │                  │
+  │ ghép h0+h1+h2 thành file gốc    │                  │
 ```
 
-## WebSocket Example
+---
+
+### Flow 3 — Real-time Sync (WebSocket)
+
+> Bob muốn biết ngay khi Alice sửa file
+
+```
+Bob                     sync-service            Alice → file-service
+  │                          │                         │
+  │── WS connect ───────────>│                         │
+  │── watch { fileId } ─────>│  đăng ký theo dõi       │
+  │                          │                         │
+  │                          │<── /internal/notify ────│  Alice upload xong
+  │                          │                         │
+  │<── file_changed ─────────│  push qua WebSocket     │
+  │   { version: 3 }         │                         │
+```
+
+---
+
+### Flow 4 — Delta Sync
+
+> Client offline một thời gian, muốn sync lại mà không tải toàn bộ file
+
+```
+Client                          file-service
+  │                                  │
+  │── POST /files/:id/sync ─────────>│  gửi clientVersion: 2
+  │<── {                             │
+  │     currentVersion: 5,           │  so sánh chunk của v2 vs v5
+  │     needDownload: [hashX,hashY], │  chunk mới → tải về
+  │     needDelete:   [hashB]        │  chunk bị xóa → xóa local
+  │   }                              │
+  │                                  │
+  │── tải hashX, hashY               │  chỉ tải phần thay đổi
+```
+
+---
+
+### Flow 5 — Conflict (Last-Write-Wins)
+
+> Alice và Bob cùng sửa file từ version 1, Bob upload trước
+
+```
+Bob                       file-service              Alice
+  │                            │                      │
+  │── complete (base=1) ──────>│                      │
+  │<── { version: 2 } ─────────│  Bob lưu v2          │
+  │                            │                      │
+  │                            │       Alice cũng upload (base=1)
+  │                            │<── complete (base=1) ─│
+  │                            │  base(1) < current(2) → CONFLICT
+  │                            │  lưu v3, loser = Bob  │
+  │                            │                      │
+  │<── upload_conflict ────────│─────────────────────>│  Alice thắng (v3)
+  │   "your v2 was overwritten"│                      │  Bob nhận conflict
+```
+
+**Quy tắc:** version nào upload sau thắng. Người thua nhận `upload_conflict` qua WebSocket. Mọi version đều được giữ lại trong DB.
+
+---
+
+## API Quick Reference
 
 ```bash
-# Connect and watch a file
-wscat -c "ws://localhost:8082/ws?userId=user_bob"
-> {"action":"watch","fileIds":["<file-uuid>"]}
+# Upload
+POST /upload/init          # bắt đầu, nhận missingChunks
+PUT  /upload/chunk/:hash   # upload từng chunk
+POST /files/:id/complete   # hoàn tất, tạo version mới
 
-# When user_alice uploads a new version, Bob receives:
-< {"event":"file_changed","fileId":"<uuid>","version":3,"changedBy":"user_alice"}
+# Download
+GET /files/:id/manifest    # lấy danh sách chunk hashes
+GET /chunks/:hash          # tải 1 chunk
+
+# Sync
+POST /files/:id/sync       # diff clientVersion vs current
+
+# WebSocket (sync-service)
+GET  /ws?userId=<id>       # kết nối
 ```
+
+## Quick Start
+
+```bash
+cd infra && docker compose up -d
+./scripts/smoke-test.sh
+./scripts/e2e-happy-path.sh
+```
+
+**MinIO Web UI:** http://localhost:9001 (minioadmin / minioadmin)
