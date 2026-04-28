@@ -1,12 +1,12 @@
 # Go Patterns — PoC Reference
 
-Patterns học được từ ecom-poc và dropbox-poc. Dùng lại cho mọi project Go tiếp theo.
+Patterns learned from ecom-poc and dropbox-poc. Reuse across future Go projects.
 
 ---
 
 ## 1. Interface → Implementation
 
-Định nghĩa contract bằng interface, implement bằng struct riêng biệt.
+Define the contract with an interface, implement with a separate struct.
 
 ```go
 // service/file_service.go — contract
@@ -23,17 +23,17 @@ type fileServiceImpl struct {   // lowercase = unexported
 }
 
 func NewFileService(chunkRepo ..., fileRepo ..., minio ...) FileService {
-    return &fileServiceImpl{...}  // trả về interface, không phải concrete type
+    return &fileServiceImpl{...}  // return interface, not concrete type
 }
 ```
 
-**Tại sao:** Controller chỉ biết interface → có thể mock trong test, swap implementation.
+**Why:** Controller only knows the interface → easy to mock in tests, easy to swap implementations.
 
 ---
 
 ## 2. Repository Interface + GORM Impl
 
-Tách layer database khỏi business logic.
+Decouple the database layer from business logic.
 
 ```go
 // repository/chunk_repository.go — interface
@@ -57,20 +57,20 @@ func NewChunkRepository(db *gorm.DB) *GormChunkRepository {
 
 ## 3. (value, bool, error) Return Pattern
 
-Khi record có thể không tồn tại — trả về `bool` thay vì dùng sentinel error.
+When a record may not exist — return `bool` instead of a sentinel error.
 
 ```go
-// bool = found/existed, không cần check ErrNotFound
+// bool = found/existed, no need to check ErrNotFound
 func (r *GormFileRepository) FindFileByID(ctx context.Context, id string) (domain.File, bool, error) {
     var f domain.File
     err := r.db.WithContext(ctx).Where("id = ?", id).First(&f).Error
     if errors.Is(err, gorm.ErrRecordNotFound) {
-        return domain.File{}, false, nil  // không phải error, chỉ là không có
+        return domain.File{}, false, nil  // not an error, record simply doesn't exist
     }
     return f, err == nil, err
 }
 
-// Call site rõ ràng:
+// Call site is explicit:
 file, found, err := repo.FindFileByID(ctx, id)
 if err != nil { ... }
 if !found { httpx.NotFound(...); return }
@@ -80,7 +80,7 @@ if !found { httpx.NotFound(...); return }
 
 ## 4. Domain Errors + errors.Is
 
-Định nghĩa sentinel errors trong domain package, map ra HTTP status ở controller.
+Define sentinel errors in the domain package, map to HTTP status in the controller.
 
 ```go
 // domain/errors.go
@@ -102,13 +102,13 @@ if err := c.svc.StoreChunk(ctx, hash, data); err != nil {
 }
 ```
 
-**Rule:** Không dùng string comparison (`err.Error() == "..."`) — dùng `errors.Is`.
+**Rule:** Never use string comparison (`err.Error() == "..."`) — always use `errors.Is`.
 
 ---
 
-## 5. Transaction với GORM
+## 5. Transaction with GORM
 
-Dùng `db.Transaction` để đảm bảo atomic — nếu 1 bước fail, rollback toàn bộ.
+Use `db.Transaction` to ensure atomicity — if one step fails, everything rolls back.
 
 ```go
 func (r *GormFileRepository) SaveVersion(ctx context.Context, version domain.FileVersion, chunks []domain.VersionChunk) error {
@@ -126,11 +126,11 @@ func (r *GormFileRepository) SaveVersion(ctx context.Context, version domain.Fil
 }
 ```
 
-**Note:** Dùng `tx` (transaction) bên trong, không dùng `r.db` — sai là không atomic.
+**Note:** Use `tx` (the transaction handle) inside the closure, never `r.db` — otherwise the operation is not atomic.
 
 ---
 
-## 6. Config Load với getEnv
+## 6. Config Loading with getEnv
 
 ```go
 // config/config.go
@@ -155,13 +155,13 @@ func getEnv(key, fallback string) string {
 }
 ```
 
-**Rule:** Default values luôn trỏ localhost → chạy được local mà không cần set env.
+**Rule:** Default values always point to localhost → works locally without any env vars set.
 
 ---
 
-## 7. Dependency Injection trong main.go
+## 7. Dependency Injection in main.go
 
-Wiring toàn bộ ở `main.go` — không dùng DI framework.
+Wire everything in `main.go` — no DI framework needed.
 
 ```go
 func main() {
@@ -194,20 +194,20 @@ func main() {
 }
 ```
 
-**Pattern:** Từ dưới lên — infra → repo → service → controller → router.
+**Pattern:** Wire bottom-up — infra → repo → service → controller → router.
 
 ---
 
 ## 8. httpx Helpers
 
-Tạo package httpx để wrap `c.JSON` — tránh hard-code status codes.
+Create an `httpx` package to wrap `c.JSON` — avoid hard-coding status codes everywhere.
 
 ```go
 // api/httpx/response.go
-func OK(c *gin.Context, data any)          { c.JSON(200, data) }
-func Created(c *gin.Context, data any)     { c.JSON(201, data) }
-func BadRequest(c *gin.Context, msg string){ c.JSON(400, gin.H{"error": msg}) }
-func NotFound(c *gin.Context, msg string)  { c.JSON(404, gin.H{"error": msg}) }
+func OK(c *gin.Context, data any)              { c.JSON(200, data) }
+func Created(c *gin.Context, data any)         { c.JSON(201, data) }
+func BadRequest(c *gin.Context, msg string)    { c.JSON(400, gin.H{"error": msg}) }
+func NotFound(c *gin.Context, msg string)      { c.JSON(404, gin.H{"error": msg}) }
 func InternalError(c *gin.Context, msg string) { c.JSON(500, gin.H{"error": msg}) }
 
 // Controller usage
@@ -217,7 +217,7 @@ httpx.BadRequest(ctx, "ownerId is required")
 
 ---
 
-## 9. AutoMigrate tại startup
+## 9. AutoMigrate at Startup
 
 ```go
 // repository/postgres.go
@@ -237,81 +237,101 @@ func NewPostgresDB(dsn string) (*gorm.DB, error) {
 }
 ```
 
-**Note:** Chỉ dùng AutoMigrate cho PoC. Production dùng migration files (goose, migrate).
+**Note:** AutoMigrate is only for PoC. Production should use migration files (goose, migrate).
 
 ---
 
-## 10. Fire-and-forget Goroutine
+## 10. Fire-and-Forget Goroutine
 
-Khi cần notify external service mà không muốn block response.
+When you need to notify an external service without blocking the response.
 
 ```go
-// controller — upload complete xong, notify sync trong background
-version, err := c.svc.CompleteUpload(ctx, ...)
+// controller — complete upload, notify sync in the background
+result, err := c.svc.CompleteUpload(ctx, ...)
 // ...
 
 go func() {
     if err := c.syncClient.Notify(context.Background(), client.NotifyRequest{
-        FileID:    fileID,
-        Version:   version,
-        ChangedBy: req.OwnerID,
+        FileID:      fileID,
+        Version:     result.Version,
+        ChangedBy:   req.OwnerID,
+        Conflict:    result.Conflict,
+        LoserUserID: result.LoserUserID,
     }); err != nil {
-        log.Printf("sync notify: %v", err)  // log nhưng không fail request
+        log.Printf("sync notify: %v", err)  // log but don't fail the request
     }
 }()
 
-httpx.OK(ctx, gin.H{"fileId": fileID, "version": version})
+httpx.OK(ctx, gin.H{"fileId": fileID, "version": result.Version})
 ```
 
-**Tại sao:** Client không cần chờ notification gửi xong. Nếu sync-service down thì upload vẫn thành công.
+**Why:** The client doesn't need to wait for the notification to be delivered. Upload succeeds even if sync-service is down.
 
 ---
 
 ## 11. WebSocket Hub — Goroutine + Channel + Mutex
 
-Pattern cho real-time notification đến nhiều clients.
+Pattern for real-time notifications to multiple concurrent clients.
 
 ```go
 type Client struct {
     UserID  string
     FileIDs map[string]bool
     Conn    *websocket.Conn
-    Send    chan []byte   // buffered channel — không block khi send
-    Done    chan struct{} // close để signal goroutine dừng
+    Send    chan []byte   // buffered channel — won't block on send
+    Done    chan struct{} // close to signal goroutines to stop
 }
 
 type Hub struct {
-    mu      sync.RWMutex        // RWMutex: nhiều reader, 1 writer
+    mu      sync.RWMutex        // RWMutex: many readers, one writer
     clients map[string]*Client
 }
 
-// Ghi: exclusive lock
+// Write: exclusive lock
 func (h *Hub) Register(c *Client) {
     h.mu.Lock()
     defer h.mu.Unlock()
     h.clients[c.UserID] = c
 }
 
-// Đọc: shared lock — nhiều goroutine đọc cùng lúc
+// Read: shared lock — multiple goroutines can read concurrently
 func (h *Hub) NotifyFileChanged(fileID, changedBy string, payload []byte) int {
     h.mu.RLock()
     defer h.mu.RUnlock()
     for _, c := range h.clients {
         select {
         case c.Send <- payload:  // non-blocking send
-        default:                 // full buffer → drop, đừng block
+        default:                 // buffer full → drop, don't block
         }
+    }
+}
+
+// Direct notify: target a specific user regardless of watch list
+func (h *Hub) NotifyUser(userID string, payload []byte) bool {
+    h.mu.RLock()
+    defer h.mu.RUnlock()
+    c, ok := h.clients[userID]
+    if !ok { return false }
+    select {
+    case c.Send <- payload:
+        return true
+    default:
+        return false
     }
 }
 ```
 
-**Rule:** `select { case ch <- v: default: }` = non-blocking send. Tránh deadlock khi buffer đầy.
+**Rule:** `select { case ch <- v: default: }` = non-blocking send. Prevents deadlock when buffer is full.
+
+**When to use Mutex vs RWMutex:**
+- `sync.Mutex` — simple exclusive lock; use when reads and writes are roughly equal
+- `sync.RWMutex` — use when reads heavily outnumber writes (e.g. hub notifications read the map far more than registrations write it)
 
 ---
 
-## 12. Background Worker với ticker + ctx.Done()
+## 12. Background Worker with Ticker + ctx.Done()
 
-Pattern cho periodic tasks (outbox relay, cleanup jobs...).
+Pattern for periodic tasks (outbox relay, cleanup jobs, etc.).
 
 ```go
 // ecom-poc: outbox relay
@@ -323,7 +343,7 @@ func StartRelay(ctx context.Context, outbox repository.OutboxRepository, pub Pub
             select {
             case <-ctx.Done():   // graceful shutdown
                 return
-            case <-ticker.C:    // mỗi 3s
+            case <-ticker.C:    // every 3s
                 if err := runOnce(ctx, outbox, pub); err != nil {
                     log.Printf("relay error: %v", err)
                 }
@@ -333,55 +353,55 @@ func StartRelay(ctx context.Context, outbox repository.OutboxRepository, pub Pub
 }
 ```
 
-**Tại sao `select`:** Không thể `for { tick(); work() }` vì sẽ bị block mãi — không bắt được ctx.Done().
+**Why `select`:** A plain `for { tick(); work() }` loop would block forever and never catch `ctx.Done()`.
 
 ---
 
-## 13. content-addressable Storage
+## 13. Content-Addressable Storage
 
-Dùng hash của nội dung làm key — tự động dedup.
+Use the hash of the content as the key — automatic deduplication.
 
 ```go
-// Chunk PK = SHA-256 hash của data
+// Chunk PK = SHA-256 hash of data
 type Chunk struct {
     Hash       string `gorm:"primaryKey"`  // hash = identity
-    StorageKey string                       // "chunks/<hash>" trong MinIO
+    StorageKey string                       // "chunks/<hash>" in MinIO
 }
 
 // Service: verify + store
 func (s *fileServiceImpl) StoreChunk(ctx context.Context, hash string, data []byte) error {
     computed := sha256.Sum256(data)
     if hex.EncodeToString(computed[:]) != hash {
-        return domain.ErrHashMismatch  // client gửi sai hash
+        return domain.ErrHashMismatch  // client sent wrong hash
     }
     storageKey := "chunks/" + hash
     s.minio.Put(ctx, storageKey, data)
     s.chunkRepo.Save(ctx, domain.Chunk{Hash: hash, StorageKey: storageKey})
 }
 
-// Dedup: FindExistingHashes → client chỉ upload những gì server chưa có
+// Dedup: FindExistingHashes → client only uploads what the server doesn't have
 existing, _ := s.chunkRepo.FindExistingHashes(ctx, req.ChunkHashes)
-// → WHERE hash IN ('aaa','bbb','ccc') → trả về những hash đã có
+// → WHERE hash IN ('aaa','bbb','ccc') → returns hashes already stored
 ```
 
-**Ứng dụng tương tự:** Git lưu blob/tree/commit bằng SHA. ZFS/Btrfs dùng cho block dedup.
+**Similar approach:** Git stores blobs/trees/commits by SHA. ZFS/Btrfs use it for block dedup.
 
 ---
 
 ## 14. Set-Diff Algorithm
 
-Tìm added/removed giữa 2 tập hợp — dùng cho delta sync.
+Find added/removed items between two sets — used for delta sync.
 
 ```go
 func (s *fileServiceImpl) GetSyncDiff(...) (added, removed []string, ...) {
-    clientSet  := toSet(clientChunks)   // version client đang có
-    currentSet := toSet(currentChunks)  // version server hiện tại
+    clientSet  := toSet(clientChunks)   // chunks the client currently has
+    currentSet := toSet(currentChunks)  // chunks in the current server version
 
     for h := range currentSet {
-        if !clientSet[h] { added = append(added, h) }   // mới ở server
+        if !clientSet[h] { added = append(added, h) }    // new on server
     }
     for h := range clientSet {
-        if !currentSet[h] { removed = append(removed, h) } // bị xóa ở server
+        if !currentSet[h] { removed = append(removed, h) } // deleted on server
     }
 }
 
@@ -392,37 +412,37 @@ func toSet(items []string) map[string]bool {
 }
 ```
 
-**Pattern:** `map[string]bool` làm Set trong Go. Lookup O(1).
+**Pattern:** `map[string]bool` as a Set in Go. O(1) lookup.
 
 ---
 
 ## 15. Layered Error Wrapping
 
 ```go
-// Wrap với context để dễ trace:
+// Wrap with context to make tracing easier:
 if err := pub.Publish(ctx, topic, eventType, payload); err != nil {
     return fmt.Errorf("publish event %d: %w", e.ID, err)
 }
 
-// Unwrap ở nơi khác:
+// Unwrap elsewhere:
 if errors.Is(err, someSpecificError) { ... }
 ```
 
-**Rule:** `%w` để wrap (có thể unwrap), `%v` chỉ format string (không unwrap được).
+**Rule:** `%w` to wrap (unwrappable via `errors.Is`), `%v` for plain string formatting (not unwrappable).
 
 ---
 
-## Summary — Checklist cho project Go mới
+## Summary — Checklist for a new Go project
 
 ```
-□ domain/    → structs + sentinel errors (không import gì từ infra)
+□ domain/    → structs + sentinel errors (no imports from infra)
 □ repository/→ interface + gorm impl + NewPostgresDB (AutoMigrate)
 □ service/   → interface + impl (inject repos + clients)
-□ client/    → HTTP client gọi service khác
+□ client/    → HTTP client to call other services
 □ api/
 │  ├── httpx/     → OK/Created/BadRequest/NotFound/InternalError
-│  ├── controller/→ parse request → call service → map error → return
+│  ├── controller/→ parse request → call service → map error → respond
 │  └── routes/    → Register(r *gin.Engine, ctrl ...)
 □ config/    → Load() + getEnv(key, fallback)
-□ cmd/api/main.go → wire everything từ dưới lên
+□ cmd/api/main.go → wire everything bottom-up
 ```

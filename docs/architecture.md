@@ -85,12 +85,24 @@ Chunks are keyed by hash → automatic deduplication at storage level.
 
 ## Conflict Resolution
 
-**Strategy: last-write-wins**
-- Both clients upload from same base version → last `CompleteUpload` wins
-- Previous version preserved in `file_versions` history
-- Losing client gets notified via WebSocket → can restore from version history
+**Strategy: last-write-wins with explicit detection**
 
-Rationale: simple, predictable, sufficient for PoC. Merge strategies require file-format awareness (text diff vs binary).
+1. Client sends `baseVersion` in `CompleteUpload` — the version it started editing from
+2. Server compares `baseVersion` vs `currentVersion`:
+   - `baseVersion == currentVersion` → no conflict, save new version
+   - `baseVersion < currentVersion` → conflict detected (someone uploaded in between)
+3. Server **always saves the new version** (last write wins) regardless of conflict
+4. If conflict: server queries `GetVersionCreator(currentVersion)` to identify the losing user
+5. sync-service sends `upload_conflict` event directly to the loser via `Hub.NotifyUser`
+
+```
+No conflict:  base=2, current=2 → save v3, broadcast file_changed to watchers
+Conflict:     base=1, current=2 → save v3, broadcast file_changed + push upload_conflict to loser
+```
+
+Full version history is always preserved — the losing user can restore from any previous version.
+
+Rationale: simple and predictable. Merge strategies require file-format awareness (text diff3 vs binary). Not suitable for generic PoC scope.
 
 ## Trade-offs
 
