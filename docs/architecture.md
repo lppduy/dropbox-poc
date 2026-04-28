@@ -19,7 +19,7 @@ Handles all file operations: upload lifecycle, download, versioning, sync diff.
 ### sync-service (port 8082)
 Stateful WebSocket hub. Pushes events to watching clients.
 
-**Dependencies:** None (stateless infra)
+**Dependencies:** None (no external infra — state is in-memory only)
 
 **Key design decisions:**
 - In-memory hub with RWMutex (sufficient for single-instance PoC)

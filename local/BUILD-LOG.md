@@ -28,3 +28,24 @@ This is the same model used by Git, Btrfs, ZFS.
 - MinIO `BucketExists` called at startup to auto-create bucket
 - WebSocket upgrade in Gin requires `CheckOrigin: return true` for local dev
 - Sync notify runs in goroutine to not block upload response
+
+## Day 2
+
+### Conflict detection (explicit last-write-wins)
+
+**Problem:** Last-write-wins was implicit — the losing client had no way to know their version was overwritten.
+
+**Solution:**
+- Client sends `baseVersion` in `CompleteUpload` (the version it started editing from)
+- Server detects conflict when `baseVersion < currentVersion`
+- Server still saves the new version (last write wins)
+- Server queries `GetVersionCreator(currentVersion)` to identify the loser
+- file-service notifies sync-service with `conflict: true, loserUserId`
+- sync-service calls `Hub.NotifyUser(loserUserId)` to push `upload_conflict` event directly to the losing client
+
+**Key decision:** Use `Hub.NotifyUser` (direct user notify) vs `NotifyFileChanged` (broadcast to watchers) — conflict notification is personal, not a broadcast.
+
+### Docs update
+- All docs translated to English (GO-PATTERNS.md was mixed Vietnamese/English)
+- Conflict sequence diagram added to sequence-sync.md
+- GO-PATTERNS.md copied to `__projects/` root for cross-project reference

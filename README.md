@@ -2,6 +2,7 @@
 
 Distributed file storage system with chunking, deduplication, delta sync, and real-time WebSocket notifications.
 
+**Repo:** https://github.com/lppduy/dropbox-poc  
 **Stack:** Go + Gin + PostgreSQL + MinIO + WebSocket (gorilla)
 
 ## Architecture

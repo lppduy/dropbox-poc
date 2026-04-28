@@ -18,6 +18,15 @@
 - [x] e2e-happy-path.sh
 - [x] README, architecture.md, tradeoffs.md, sequence diagrams
 
+## Phase 3.5: Conflict Detection ✅
+- [x] `baseVersion` field in `CompleteUpload` request
+- [x] Conflict detection in `fileServiceImpl.CompleteUpload`
+- [x] `GetVersionCreator` repository method
+- [x] `LoserUserID` propagated to sync-service via `NotifyRequest`
+- [x] `Hub.NotifyUser` for direct user notification
+- [x] `upload_conflict` WebSocket event pushed to losing client
+- [x] Conflict sequence diagram added to docs
+
 ## Phase 4: Polish (optional)
 - [ ] Pagination for manifest (large files with many chunks)
 - [ ] File listing endpoint (`GET /files?ownerId=...`)
