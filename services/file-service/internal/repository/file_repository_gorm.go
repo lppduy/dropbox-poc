@@ -82,3 +82,12 @@ func (r *GormFileRepository) UpdateCurrentVersion(ctx context.Context, fileID st
 		Where("id = ?", fileID).
 		Update("current_version", version).Error
 }
+
+func (r *GormFileRepository) GetVersionCreator(ctx context.Context, fileID string, version int) (string, error) {
+	var createdBy string
+	err := r.db.WithContext(ctx).
+		Model(&domain.FileVersion{}).
+		Where("file_id = ? AND version = ?", fileID, version).
+		Pluck("created_by", &createdBy).Error
+	return createdBy, err
+}

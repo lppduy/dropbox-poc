@@ -21,9 +21,11 @@ func NewSyncClient(baseURL string) *SyncClient {
 }
 
 type NotifyRequest struct {
-	FileID    string `json:"fileId"`
-	Version   int    `json:"version"`
-	ChangedBy string `json:"changedBy"`
+	FileID      string `json:"fileId"`
+	Version     int    `json:"version"`
+	ChangedBy   string `json:"changedBy"`
+	Conflict    bool   `json:"conflict"`
+	LoserUserID string `json:"loserUserId,omitempty"`
 }
 
 func (c *SyncClient) Notify(ctx context.Context, req NotifyRequest) error {

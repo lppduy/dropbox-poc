@@ -123,15 +123,18 @@ func (h *Handler) readPump(cl *hub.Client) {
 // NotifyHandler is an internal HTTP endpoint called by file-service after upload completes.
 func (h *Handler) NotifyHandler(c *gin.Context) {
 	var req struct {
-		FileID    string `json:"fileId"`
-		Version   int    `json:"version"`
-		ChangedBy string `json:"changedBy"`
+		FileID      string `json:"fileId"`
+		Version     int    `json:"version"`
+		ChangedBy   string `json:"changedBy"`
+		Conflict    bool   `json:"conflict"`
+		LoserUserID string `json:"loserUserId"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.FileID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "fileId, version, changedBy required"})
 		return
 	}
 
+	// Broadcast file_changed to all watchers (except the uploader)
 	payload, _ := json.Marshal(gin.H{
 		"event":     "file_changed",
 		"fileId":    req.FileID,
@@ -140,5 +143,17 @@ func (h *Handler) NotifyHandler(c *gin.Context) {
 	})
 	notified := h.hub.NotifyFileChanged(req.FileID, req.ChangedBy, payload)
 
-	c.JSON(http.StatusOK, gin.H{"notified": notified})
+	// If conflict detected, also send upload_conflict to the loser
+	if req.Conflict && req.LoserUserID != "" {
+		conflictPayload, _ := json.Marshal(gin.H{
+			"event":     "upload_conflict",
+			"fileId":    req.FileID,
+			"version":   req.Version,
+			"changedBy": req.ChangedBy,
+			"message":   "your version was overwritten (last-write-wins)",
+		})
+		h.hub.NotifyUser(req.LoserUserID, conflictPayload)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"notified": notified, "conflict": req.Conflict})
 }

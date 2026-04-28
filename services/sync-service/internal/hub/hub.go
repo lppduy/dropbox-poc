@@ -61,6 +61,22 @@ func (h *Hub) NotifyFileChanged(fileID, changedBy string, payload []byte) int {
 	return notified
 }
 
+// NotifyUser pushes a direct event to a specific user by ID (regardless of watch list).
+func (h *Hub) NotifyUser(userID string, payload []byte) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	c, ok := h.clients[userID]
+	if !ok {
+		return false
+	}
+	select {
+	case c.Send <- payload:
+		return true
+	default:
+		return false
+	}
+}
+
 func (h *Hub) Count() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()

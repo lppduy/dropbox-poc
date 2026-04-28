@@ -84,15 +84,22 @@ func (s *fileServiceImpl) StoreChunk(ctx context.Context, hash string, data []by
 	})
 }
 
-func (s *fileServiceImpl) CompleteUpload(ctx context.Context, fileID string, orderedHashes []string, ownerID string) (int, error) {
+func (s *fileServiceImpl) CompleteUpload(ctx context.Context, fileID string, orderedHashes []string, ownerID string, baseVersion int) (CompleteUploadResult, error) {
 	currentVersion, err := s.fileRepo.GetCurrentVersion(ctx, fileID)
 	if err != nil {
-		return 0, err
+		return CompleteUploadResult{}, err
 	}
-	newVersion := currentVersion + 1
 
+	// Detect conflict: client based on an older version that has since been updated
+	var loserUserID string
+	conflict := baseVersion > 0 && baseVersion < currentVersion
+	if conflict {
+		loserUserID, _ = s.fileRepo.GetVersionCreator(ctx, fileID, currentVersion)
+	}
+
+	newVersion := currentVersion + 1
 	versionID := uuid.New().String()
-	version := domain.FileVersion{
+	fv := domain.FileVersion{
 		ID:        versionID,
 		FileID:    fileID,
 		Version:   newVersion,
@@ -108,13 +115,18 @@ func (s *fileServiceImpl) CompleteUpload(ctx context.Context, fileID string, ord
 		}
 	}
 
-	if err := s.fileRepo.SaveVersion(ctx, version, chunks); err != nil {
-		return 0, err
+	if err := s.fileRepo.SaveVersion(ctx, fv, chunks); err != nil {
+		return CompleteUploadResult{}, err
 	}
 	if err := s.fileRepo.UpdateCurrentVersion(ctx, fileID, newVersion); err != nil {
-		return 0, err
+		return CompleteUploadResult{}, err
 	}
-	return newVersion, nil
+
+	return CompleteUploadResult{
+		Version:     newVersion,
+		Conflict:    conflict,
+		LoserUserID: loserUserID,
+	}, nil
 }
 
 func (s *fileServiceImpl) GetManifest(ctx context.Context, fileID string) ([]string, error) {

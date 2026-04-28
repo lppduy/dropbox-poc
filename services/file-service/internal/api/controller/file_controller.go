@@ -78,13 +78,14 @@ func (c *FileController) CompleteUpload(ctx *gin.Context) {
 	var req struct {
 		OwnerID       string   `json:"ownerId"`
 		OrderedHashes []string `json:"orderedHashes"`
+		BaseVersion   int      `json:"baseVersion"` // 0 means first upload (no conflict detection)
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil || req.OwnerID == "" || len(req.OrderedHashes) == 0 {
 		httpx.BadRequest(ctx, "ownerId and orderedHashes are required")
 		return
 	}
 
-	version, err := c.svc.CompleteUpload(ctx.Request.Context(), fileID, req.OrderedHashes, req.OwnerID)
+	result, err := c.svc.CompleteUpload(ctx.Request.Context(), fileID, req.OrderedHashes, req.OwnerID, req.BaseVersion)
 	if err != nil {
 		httpx.InternalError(ctx, "failed to complete upload")
 		return
@@ -92,15 +93,21 @@ func (c *FileController) CompleteUpload(ctx *gin.Context) {
 
 	go func() {
 		if err := c.syncClient.Notify(ctx.Request.Context(), client.NotifyRequest{
-			FileID:    fileID,
-			Version:   version,
-			ChangedBy: req.OwnerID,
+			FileID:      fileID,
+			Version:     result.Version,
+			ChangedBy:   req.OwnerID,
+			Conflict:    result.Conflict,
+			LoserUserID: result.LoserUserID,
 		}); err != nil {
 			log.Printf("sync notify: %v", err)
 		}
 	}()
 
-	httpx.OK(ctx, gin.H{"fileId": fileID, "version": version})
+	httpx.OK(ctx, gin.H{
+		"fileId":   fileID,
+		"version":  result.Version,
+		"conflict": result.Conflict,
+	})
 }
 
 func (c *FileController) GetManifest(ctx *gin.Context) {

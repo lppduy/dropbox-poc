@@ -14,4 +14,5 @@ type FileRepository interface {
 	GetCurrentChunks(ctx context.Context, fileID string) ([]string, error)
 	GetCurrentVersion(ctx context.Context, fileID string) (int, error)
 	UpdateCurrentVersion(ctx context.Context, fileID string, version int) error
+	GetVersionCreator(ctx context.Context, fileID string, version int) (string, error)
 }
